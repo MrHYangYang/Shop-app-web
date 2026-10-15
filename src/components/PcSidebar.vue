@@ -1,27 +1,61 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { getGoodsById } from '@/composables/useGoods'
+import { categories, getGoodsById, loadCategories } from '@/composables/useGoods'
 
 const route = useRoute()
 
-const menus = [
-  { key: 'all', label: '首页', icon: 'home-o', to: '/home' },
-  { key: '手机', label: '手机', icon: 'phone-o', to: { path: '/category', query: { name: '手机' } } },
-  { key: '笔记本电脑', label: '笔记本', icon: 'desktop-o', to: { path: '/category', query: { name: '笔记本电脑' } } },
-  { key: '耳机', label: '耳机', icon: 'service-o', to: { path: '/category', query: { name: '耳机' } } },
-  { key: '相机', label: '相机', icon: 'photograph', to: { path: '/category', query: { name: '相机' } } },
-  { key: '智能穿戴', label: '智能手表', icon: 'clock-o', to: { path: '/category', query: { name: '智能穿戴' } } },
-  { key: '配件', label: '配件', icon: 'gift-o', to: { path: '/category', query: { name: '配件' } } },
-]
+const ICON_MAP = {
+  Iphone: 'phone-o',
+  Monitor: 'desktop-o',
+  Headset: 'service-o',
+  Camera: 'photograph',
+  Watch: 'clock-o',
+  House: 'wap-home-o',
+  SetUp: 'notes-o',
+  Box: 'gift-o',
+}
+
+onMounted(() => {
+  loadCategories().catch(() => {})
+})
+
+const menus = computed(() => {
+  const home = { key: 'all', label: '首页', icon: 'home-o', to: '/home' }
+  const cats = (categories.value || []).map((c) => ({
+    key: String(c.id),
+    label: c.name,
+    icon: ICON_MAP[c.icon] || 'apps-o',
+    to: { path: '/category', query: { name: c.name, categoryId: String(c.id) } },
+  }))
+  return [home, ...cats]
+})
 
 const activeKey = computed(() => {
-  if (route.path.startsWith('/goods/')) {
-    return getGoodsById(route.params.id)?.category || ''
-  }
-  const category = route.query.category || route.query.name
-  if (category) return String(category)
   if (route.path === '/home') return 'all'
+  if (route.path.startsWith('/goods/')) {
+    const goods = getGoodsById(route.params.id)
+    if (goods?.categoryId != null) {
+      const byId = categories.value.find((c) => String(c.id) === String(goods.categoryId))
+      if (byId) return String(byId.id)
+      // goods may be leaf category; match level-2 parent via name if present
+    }
+    if (goods?.category) {
+      const byName = categories.value.find((c) => c.name === goods.category)
+      if (byName) return String(byName.id)
+    }
+    return ''
+  }
+  if (route.path.startsWith('/category')) {
+    if (route.query.categoryId) {
+      return String(route.query.categoryId)
+    }
+    const name = route.query.name || route.query.category
+    if (name) {
+      const hit = categories.value.find((c) => c.name === String(name))
+      if (hit) return String(hit.id)
+    }
+  }
   return ''
 })
 </script>

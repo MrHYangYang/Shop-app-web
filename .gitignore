@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Env local overrides (keep .env / .env.development / .env.production committed)
+.env.local
+.env.*.local

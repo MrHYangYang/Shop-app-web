@@ -1,34 +1,47 @@
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import * as api from '@/api'
+import { getToken } from '@/utils/request'
+import { normalizeSearchKeyword } from '@/utils/search'
 
 const router = useRouter()
 const keyword = ref('')
-const history = ref(JSON.parse(localStorage.getItem('shop-app-search') || '[]'))
+const history = ref([])
 const hotWords = ['耳机', '笔记本', '华为', '相机', '手表', '键盘']
-
-const persist = () => {
-  localStorage.setItem('shop-app-search', JSON.stringify(history.value.slice(0, 8)))
+const loadHistory = async () => {
+  if (!getToken()) {
+    history.value = JSON.parse(localStorage.getItem('shop-app-search') || '[]')
+    return
+  }
+  try {
+    const list = await api.searchHistory({ limit: 8 })
+    history.value = (list || []).map((i) => i.keyword).filter(Boolean)
+  } catch {
+    history.value = JSON.parse(localStorage.getItem('shop-app-search') || '[]')
+  }
 }
-
 const go = (word) => {
-  const value = (word || keyword.value).trim()
+  const value = normalizeSearchKeyword(word || keyword.value)
   if (!value) return
+  keyword.value = value
   history.value = [value, ...history.value.filter((item) => item !== value)].slice(0, 8)
-  persist()
+  localStorage.setItem('shop-app-search', JSON.stringify(history.value))
+  // 模糊搜索：后端按名称/型号/简介/品牌/分类 LIKE 匹配
   router.push({ path: '/goods', query: { keyword: value } })
 }
-
-const clearHistory = () => {
+const clearHistory = async () => {
   history.value = []
-  persist()
+  localStorage.removeItem('shop-app-search')
+  if (getToken()) { try { await api.clearSearch() } catch (e) {} }
 }
+onMounted(loadHistory)
 </script>
 
 <template>
   <div class="search">
     <form class="bar" @submit.prevent="go()">
-      <van-search v-model="keyword" show-action placeholder="搜索数码好物" autofocus @search="go()" @cancel="router.back()" />
+      <van-search v-model="keyword" show-action placeholder="模糊搜索：名称/品牌/型号" autofocus @search="go()" @cancel="router.back()" />
     </form>
     <section v-if="history.length">
       <div class="head">

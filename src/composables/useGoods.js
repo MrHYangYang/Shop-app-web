@@ -1,171 +1,170 @@
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
+import * as api from '@/api'
 
-export const categories = [
-  { name: '手机', icon: '📱', color: '#4d7cff' },
-  { name: '笔记本电脑', icon: '💻', color: '#8b6cf6' },
-  { name: '耳机', icon: '🎧', color: '#22c3c8' },
-  { name: '相机', icon: '📷', color: '#f59e0b' },
-  { name: '智能穿戴', icon: '⌚', color: '#ef4444' },
-  { name: '配件', icon: '🔌', color: '#64748b' },
-]
+export const categories = ref([])
+export const banners = ref([])
+export const homeMidBanners = ref([])
+export const categoryBanners = ref([])
+export const goodsList = ref([])
+export const hotGoods = ref([])
+export const newGoods = ref([])
+export const recommendGoods = ref([])
+/** Refresh diversity seed: new on page reset, reused for pagination */
+let recommendSeed = 0
 
-export const banners = [
-  { id: 'B1001', title: '数码焕新季', subtitle: '换新好物低至 5 折起', tag: 'renew', theme: 'blue' },
-  { id: 'B1002', title: '爆款直降', subtitle: '热销数码限时特惠', tag: 'hot', theme: 'navy' },
-  { id: 'B1003', title: '新品首发', subtitle: '数码新品抢先体验', tag: 'new', theme: 'purple' },
-]
-
-const imageMap = {
-  笔记本电脑: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=800&h=800&q=80',
-  手机: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=800&h=800&q=80',
-  耳机: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=800&h=800&q=80',
-  相机: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&h=800&q=80',
-  智能穿戴: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&h=800&q=80',
-  配件: 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&h=800&q=80',
+const ICON_EMOJI = {
+  Box: '📦',
+  Iphone: '📱',
+  Monitor: '💻',
+  Headset: '🎧',
+  Camera: '📷',
+  Watch: '⌚',
+  House: '🏠',
+  SetUp: '📚',
 }
 
-const extraImages = [
-  'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=800&h=800&q=80',
-  'https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?auto=format&fit=crop&w=800&h=800&q=80',
-  'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&h=800&q=80',
-  'https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?auto=format&fit=crop&w=800&h=800&q=80',
-]
-
-const shops = [
-  '数码旗舰店',
-  '笔记本优选店',
-  '耳机声学馆',
-  '配件专卖店',
-  '相机专营店',
-  '智能穿戴体验店',
-]
-
-const specByCategory = {
-  笔记本电脑: { cpu: 'i7-13700H', screen: '14英寸', memory: '16GB', disk: '512GB', battery: '70Wh', warranty: '全国联保两年' },
-  手机: { cpu: '骁龙8 Gen3', screen: '6.7英寸', memory: '12GB', disk: '256GB', battery: '5000mAh', warranty: '全国联保一年' },
-  耳机: { cpu: '主动降噪芯', screen: '-', memory: '-', disk: '-', battery: '30h', warranty: '全国联保一年' },
-  相机: { cpu: 'BIONZ XR', screen: '3.0英寸', memory: '-', disk: '双卡槽', battery: 'NP-FZ100', warranty: '全国联保两年' },
-  智能穿戴: { cpu: 'S9 SiP', screen: '1.9英寸', memory: '64GB', disk: '-', battery: '18h', warranty: '全国联保一年' },
-  配件: { cpu: '-', screen: '-', memory: '-', disk: '-', battery: '-', warranty: '全国联保一年' },
+function mapGoods(g) {
+  if (!g) return null
+  const rawPrice = g.price ?? g.salePrice ?? 0
+  const price = typeof rawPrice === 'number' ? rawPrice : Number(rawPrice) || 0
+  return {
+    ...g,
+    id: g.id,
+    name: g.name || '',
+    image: g.image || g.coverImage || '',
+    coverImage: g.coverImage || g.image || '',
+    price,
+    sales: Number(g.sales || 0),
+    shopName: g.shopName || '',
+    recommend: Number(g.recommend) === 1 || g.recommend === true,
+    hot: Number(g.hot) === 1 || g.hot === true,
+    isNew: Number(g.isNew) === 1 || g.isNew === true,
+  }
 }
 
-const productSeeds = [
-  { name: '华为 Mate 60', category: '手机', price: 4999, sales: 980, brand: '华为', shop: '手机通讯广场' },
-  { name: 'iPhone 15 Pro', category: '手机', price: 7999, sales: 1260, brand: '苹果', shop: '数码旗舰店' },
-  { name: '小米 14', category: '手机', price: 3999, sales: 860, brand: '小米', shop: '手机通讯广场' },
-  { name: 'MacBook Air 13', category: '笔记本电脑', price: 8999, sales: 420, brand: '苹果', shop: '笔记本优选店' },
-  { name: 'ProBook 14 笔记本', category: '笔记本电脑', price: 5899, sales: 1345, brand: '联想', shop: '笔记本优选店' },
-  { name: '游戏本 16 寸', category: '笔记本电脑', price: 7699, sales: 310, brand: '戴尔', shop: '笔记本优选店' },
-  { name: '索尼降噪耳机', category: '耳机', price: 1299, sales: 1120, brand: '索尼', shop: '耳机声学馆' },
-  { name: '无线降噪耳机', category: '耳机', price: 899, sales: 1540, brand: '索尼', shop: '耳机声学馆' },
-  { name: 'AirPods Pro', category: '耳机', price: 1899, sales: 980, brand: '苹果', shop: '数码旗舰店' },
-  { name: '全画幅微单相机', category: '相机', price: 6899, sales: 256, brand: '索尼', shop: '相机专营店' },
-  { name: '运动相机', category: '相机', price: 2399, sales: 256, brand: '索尼', shop: '相机专营店' },
-  { name: '富士拍立得', category: '相机', price: 799, sales: 640, brand: '富士', shop: '摄影器材社' },
-  { name: 'Apple Watch', category: '智能穿戴', price: 2999, sales: 760, brand: '苹果', shop: '智能穿戴体验店' },
-  { name: '小米手环', category: '智能穿戴', price: 249, sales: 2100, brand: '小米', shop: '智能穿戴体验店' },
-  { name: '华为手表 GT', category: '智能穿戴', price: 1299, sales: 540, brand: '华为', shop: '智能穿戴体验店' },
-  { name: '机械键盘', category: '配件', price: 459, sales: 1345, brand: '小米', shop: '配件专卖店' },
-  { name: '移动固态硬盘', category: '配件', price: 599, sales: 880, brand: '三星', shop: '存储设备店' },
-  { name: '无线鼠标', category: '配件', price: 129, sales: 1660, brand: '罗技', shop: '游戏外设铺' },
-  { name: 'Type-C 快充头', category: '配件', price: 79, sales: 3200, brand: '小米', shop: '配件专卖店' },
-  { name: '4K 显示器', category: '配件', price: 1899, sales: 210, brand: '戴尔', shop: '配件专卖店' },
-  { name: '便携投影仪', category: '配件', price: 1599, sales: 180, brand: '极米', shop: '配件专卖店' },
-  { name: '蓝牙音箱', category: '配件', price: 199, sales: 920, brand: '漫步者', shop: '耳机声学馆' },
-  { name: 'iPhone 保护壳', category: '配件', price: 59, sales: 2800, brand: '苹果', shop: '配件专卖店' },
-  { name: '折叠屏手机', category: '手机', price: 9999, sales: 126, brand: '华为', shop: '手机通讯广场' },
-]
+function mapCategory(c) {
+  const icon = c.icon || ''
+  return {
+    ...c,
+    emoji: c.emoji || ICON_EMOJI[icon] || (icon && /[\u{1F300}-\u{1FAFF}]/u.test(icon) ? icon : '📦'),
+    color: c.color || '#4d7cff',
+  }
+}
 
-const reviewSeeds = [
-  { userName: '陈思琪', content: '音质清晰，降噪效果很好，出门通勤很合适，包装也完整。', star: 5 },
-  { userName: '李雨桐', content: '整体做工不错，发货快，实际使用体验比预期更好，会推荐给朋友。', star: 5 },
-  { userName: '王嘉宁', content: '外观精致，按键手感扎实，长时间使用也不容易累。', star: 4 },
-  { userName: '赵婉清', content: '拍照效果出色，成色和描述一致，客服回复也很及时。', star: 5 },
-  { userName: '刘子涵', content: '续航一般，其他方面都可以，性价比还行。', star: 3 },
-]
+export async function loadCategories() {
+  const list = (await api.getCategories()) || []
+  // 首页/分类页展示二级分类；若无二级则退回全部启用分类
+  const level2 = list.filter((c) => Number(c.level) === 2 && Number(c.enabled) !== 0)
+  const source = level2.length ? level2 : list.filter((c) => Number(c.enabled) !== 0)
+  categories.value = source.map(mapCategory)
+  return categories.value
+}
 
-const createGoodsList = () =>
-  productSeeds.map((seed, i) => {
-    const image = i % 5 === 2 ? extraImages[i % extraImages.length] : imageMap[seed.category]
-    const salePrice = seed.price
-    const marketPrice = salePrice + Math.round(salePrice * 0.12)
-    return {
-      id: `G${String(1001 + i)}`,
-      name: seed.name,
-      category: seed.category,
-      brand: seed.brand,
-      shopName: seed.shop || shops[i % shops.length],
-      price: salePrice,
-      salePrice,
-      marketPrice,
-      stock: 20 + (i % 40),
-      sales: seed.sales,
-      recommend: i % 3 === 0,
-      hot: seed.sales > 900,
-      isNew: i % 7 === 0,
-      image,
-      images: [image, extraImages[i % extraImages.length], extraImages[(i + 1) % extraImages.length]],
-      description: `${seed.name}，面向数码优选商城的热销型号，支持七天无理由退货。`,
-      detailText: `${seed.name} 采用优质元器件与精细工艺，日常使用流畅稳定。全国联保，支持七天无理由退货。`,
-      specs: [{ ...(specByCategory[seed.category] || specByCategory['配件']) }],
-      skuOptions: ['标准版', '高配版', '旗舰版'],
-      reviews: reviewSeeds.map((item, index) => ({
-        ...item,
-        id: `R${i}-${index}`,
-        createdAt: `2026-0${(index % 9) + 1}-${String((index % 27) + 1).padStart(2, '0')}`,
-      })),
+export async function loadBanners(position) {
+  const params = position ? { position } : undefined
+  const list = (await api.getBanners(params)) || []
+  if (position === '分类页' || position === 'category' || position === 'cate') {
+    categoryBanners.value = list
+  }
+  return list
+}
+
+export async function loadHomeBanners() {
+  const [top, mid] = await Promise.all([
+    api.getBanners({ position: '首页顶部' }),
+    api.getBanners({ position: '首页中部' }),
+  ])
+  banners.value = top || []
+  homeMidBanners.value = mid || []
+  return { banners: banners.value, homeMidBanners: homeMidBanners.value }
+}
+
+export async function fetchGoods(params = {}) {
+  const data = (await api.getGoods(params)) || {}
+  const records = (data.records || []).map(mapGoods).filter(Boolean)
+  return { ...data, records }
+}
+
+export async function loadHomeGoods() {
+  const [hot, neu] = await Promise.all([
+    api.getGoods({ page: 1, size: 4, hot: 1, random: 1 }),
+    api.getGoods({ page: 1, size: 4, isNew: 1, random: 1 }),
+  ])
+  hotGoods.value = (hot?.records || []).map(mapGoods).filter(Boolean)
+  newGoods.value = (neu?.records || []).map(mapGoods).filter(Boolean)
+  return { hotGoods: hotGoods.value, newGoods: newGoods.value }
+}
+
+/** Home recommend list via weighted collaborative filtering (/goods/recommend) */
+export async function loadRecommendGoods(page = 1, size = 10, reset = false) {
+  if (reset || page <= 1 || !recommendSeed) {
+    // new seed each full refresh / first page so lists differ; same seed keeps pagination stable
+    recommendSeed = (Date.now() ^ (Math.floor(Math.random() * 0x7fffffff))) >>> 0
+    if (recommendSeed === 0) recommendSeed = 1
+  }
+  const data = (await api.getRecommendGoods({ page, size, seed: recommendSeed })) || {}
+  const records = (data.records || []).map(mapGoods).filter(Boolean)
+  if (reset || page <= 1) {
+    recommendGoods.value = records
+  } else {
+    const seen = new Set(recommendGoods.value.map((g) => String(g.id)))
+    const merged = [...recommendGoods.value]
+    for (const g of records) {
+      if (!seen.has(String(g.id))) {
+        seen.add(String(g.id))
+        merged.push(g)
+      }
     }
-  })
+    recommendGoods.value = merged
+  }
+  goodsList.value = [...recommendGoods.value]
 
-const allGoods = ref(createGoodsList())
+  const total = Number(data.total ?? 0)
+  const pageNum = Number(data.page || page || 1)
+  const pageSize = Number(data.size || size || 10) || size || 10
+  const loaded = recommendGoods.value.length
+  const got = records.length
 
-export const getGoodsById = (id) => allGoods.value.find((item) => item.id === id) || null
+  // 以 total / 空页为准；不要仅因本页 < pageSize 就结束（后端可能跳过下架 ID）
+  let finished = false
+  if (got === 0) {
+    finished = true
+  } else if (total > 0) {
+    finished = loaded >= total || pageNum * pageSize >= total
+  } else {
+    // 无 total 时：只有空页或明确不足一页才结束
+    finished = got < pageSize
+  }
 
-export function addGoodsReview(goodsId, review) {
-  const goods = getGoodsById(goodsId)
-  if (!goods || !review?.id) return
-  if (goods.reviews.some((item) => item.id === review.id)) return
-  goods.reviews.unshift(review)
+  return {
+    ...data,
+    records,
+    total,
+    page: pageNum,
+    size: pageSize,
+    loaded,
+    finished,
+  }
 }
 
-export function removeGoodsReview(reviewId) {
-  allGoods.value.forEach((goods) => {
-    goods.reviews = goods.reviews.filter((item) => item.id !== reviewId)
-  })
+export async function fetchGoodsDetail(id) {
+  const data = await api.getGoodsDetail(id)
+  const goods = mapGoods(data.goods || data)
+  goods.shopName = data.shopName || goods.shopName || ''
+  return { ...data, goods, images: data.images || [], skus: data.skus || [], reviews: data.reviews || [] }
 }
 
-export const filterGoods = ({ category = '', keyword = '', tag = '' } = {}) => {
-  return allGoods.value.filter((item) => {
-    const matchCategory = !category || item.category === category
-    const matchKeyword =
-      !keyword ||
-      item.name.includes(keyword) ||
-      item.brand.includes(keyword) ||
-      item.shopName.includes(keyword)
-    const matchTag =
-      !tag ||
-      (tag === 'hot' && item.hot) ||
-      (tag === 'new' && item.isNew) ||
-      (tag === 'renew' && item.recommend)
-    return matchCategory && matchKeyword && matchTag
-  })
+export async function fetchGoodsReviews(id, params) {
+  return api.getGoodsReviews(id, params)
+}
+
+export function getGoodsById(id) {
+  return goodsList.value.find((g) => String(g.id) === String(id)) || null
 }
 
 export function useGoods() {
-  const hotGoods = computed(() => allGoods.value.filter((item) => item.hot).slice(0, 8))
-  const recommendGoods = computed(() => allGoods.value.filter((item) => item.recommend))
-  const newGoods = computed(() => allGoods.value.filter((item) => item.isNew))
-
   return {
-    allGoods,
-    categories,
-    banners,
-    hotGoods,
-    recommendGoods,
-    newGoods,
-    getGoodsById,
-    addGoodsReview,
-    removeGoodsReview,
-    filterGoods,
+    categories, banners, homeMidBanners, categoryBanners, goodsList, hotGoods, newGoods, recommendGoods,
+    loadCategories, loadBanners, loadHomeBanners, fetchGoods, loadHomeGoods, loadRecommendGoods, fetchGoodsDetail, fetchGoodsReviews, getGoodsById,
   }
 }

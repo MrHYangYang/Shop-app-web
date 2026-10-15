@@ -1,44 +1,52 @@
 <script setup>
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { getAddressById, saveAddress } from '@/composables/useAddress'
+import { getAddressById, loadAddresses, saveAddress } from '@/composables/useAddress'
 
-const router = useRouter()
 const route = useRoute()
+const router = useRouter()
 const showPicker = ref(false)
-const current = getAddressById(route.params.id)
-const regions = [
-  '上海市黄浦区',
-  '杭州市西湖区',
-  '成都市锦江区',
-  '广州市天河区',
-  '深圳市南山区',
-  '北京市朝阳区',
-]
+const regions = ['北京市朝阳区', '上海市浦东新区', '广州市天河区', '深圳市南山区', '杭州市西湖区', '成都市武侯区', '武汉市洪山区', '南京市鼓楼区']
+const form = reactive({ id: null, name: '', phone: '', region: '', detail: '', isDefault: false })
 
-const form = reactive({
-  id: current?.id || '',
-  name: current?.name || '',
-  phone: current?.phone || '',
-  region: current?.region || regions[0],
-  detail: current?.detail || '',
-  isDefault: current?.isDefault || false,
-})
-
-const onConfirm = ({ selectedValues }) => {
-  form.region = selectedValues[0]
+const onConfirm = ({ selectedOptions }) => {
+  form.region = selectedOptions?.[0]?.value || selectedOptions?.[0]?.text || ''
   showPicker.value = false
 }
 
-const onSave = () => {
-  if (!form.name.trim()) return showToast('请输入收货人')
-  if (!/^1\d{10}$/.test(form.phone)) return showToast('请输入正确手机号')
-  if (!form.detail.trim()) return showToast('请输入详细地址')
-  saveAddress(form)
+const onSave = async () => {
+  if (!form.name || !/^1\d{10}$/.test(form.phone) || !form.region || !form.detail) {
+    showToast('请完整填写收货信息'); return
+  }
+  await saveAddress({
+    id: form.id,
+    name: form.name,
+    phone: form.phone,
+    region: form.region,
+    detail: form.detail,
+    isDefault: form.isDefault ? 1 : 0,
+  })
   showToast('保存成功')
   router.back()
 }
+
+onMounted(async () => {
+  await loadAddresses()
+  if (route.params.id) {
+    const a = getAddressById(route.params.id)
+    if (a) {
+      Object.assign(form, {
+        id: a.id,
+        name: a.name,
+        phone: a.phone,
+        region: a.region,
+        detail: a.detail,
+        isDefault: a.isDefault === 1 || a.isDefault === true,
+      })
+    }
+  }
+})
 </script>
 
 <template>
@@ -48,8 +56,8 @@ const onSave = () => {
     <van-form @submit="onSave">
       <van-field v-model="form.name" label="收货人" placeholder="请输入姓名" />
       <van-field v-model="form.phone" type="tel" maxlength="11" label="手机号" placeholder="请输入手机号" />
-      <van-field v-model="form.region" is-link readonly label="所在地区" @click="showPicker = true" />
-      <van-field v-model="form.detail" label="详细地址" placeholder="街道、门牌号" />
+      <van-field v-model="form.region" is-link readonly label="所在地区" placeholder="请选择地区" @click="showPicker = true" />
+      <van-field v-model="form.detail" label="详细地址" placeholder="街道楼牌号" />
       <van-cell title="设为默认地址">
         <template #right-icon>
           <van-switch v-model="form.isDefault" size="20" />
@@ -70,26 +78,13 @@ const onSave = () => {
 </template>
 
 <style scoped>
-.page {
-  min-height: 100vh;
-  background: #fff;
-}
-
-.save {
-  padding: 24px 16px;
-}
-
-:deep(.van-form) {
-  background: #fff;
-}
-
+.page { min-height: 100vh; background: #fff; }
+.save { padding: 24px 16px; }
+:deep(.van-form) { background: #fff; }
 @media (min-width: 960px) {
   .page {
-    width: min(640px, calc(100% - 48px));
-    margin: 24px auto 40px;
-    border-radius: 16px;
-    overflow: hidden;
-    box-shadow: 0 12px 32px rgba(77, 124, 255, 0.08);
+    width: min(640px, calc(100% - 48px)); margin: 24px auto 40px; border-radius: 16px;
+    overflow: hidden; box-shadow: 0 12px 32px rgba(77, 124, 255, 0.08);
   }
 }
 </style>

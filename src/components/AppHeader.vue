@@ -1,14 +1,22 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCart } from '@/composables/useCart'
 import { useUser } from '@/composables/useUser'
+import { normalizeSearchKeyword } from '@/utils/search'
 
 const route = useRoute()
 const router = useRouter()
 const { count } = useCart()
 const { user, isLogin } = useUser()
 const keyword = ref(typeof route.query.keyword === 'string' ? route.query.keyword : '')
+
+watch(
+  () => route.query.keyword,
+  (v) => {
+    keyword.value = typeof v === 'string' ? v : ''
+  },
+)
 
 const menus = [
   { path: '/cart', label: '购物车' },
@@ -21,11 +29,12 @@ const isActive = (path) => {
 }
 
 const onSearch = () => {
-  const value = keyword.value.trim()
+  const value = normalizeSearchKeyword(keyword.value)
   if (!value) {
     router.push('/search')
     return
   }
+  keyword.value = value
   router.push({ path: '/goods', query: { keyword: value } })
 }
 
@@ -37,7 +46,7 @@ const userLabel = computed(() => (isLogin.value ? user.value.name : '登录'))
     <div class="inner">
       <form class="search" @submit.prevent="onSearch">
         <van-icon name="search" />
-        <input v-model="keyword" type="search" placeholder="搜索手机、笔记本、耳机" />
+        <input v-model="keyword" type="search" placeholder="模糊搜索名称/品牌/型号" />
         <button type="submit">搜索</button>
       </form>
 

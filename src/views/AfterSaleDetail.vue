@@ -1,69 +1,49 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showConfirmDialog, showImagePreview, showToast } from 'vant'
-import {
-  approveAfterSale,
-  cancelAfterSale,
-  completeAfterSale,
-  getAfterSaleById,
-  rejectAfterSale,
-  submitReturnExpress,
-} from '@/composables/useAfterSales'
+import { getAfterSaleDetail, cancelAfterSale, submitReturnExpress } from '@/composables/useAfterSales'
+import { showConfirmDialog, showToast } from 'vant'
 
 const route = useRoute()
 const router = useRouter()
+const ticket = ref(null)
+const expressName = ref('顺丰速运')
 const expressNo = ref('')
-const ticket = computed(() => getAfterSaleById(route.params.id))
-
-const onCancel = async () => {
-  await showConfirmDialog({ title: '取消申请', message: '确定取消该售后申请吗？' })
-  cancelAfterSale(ticket.value.id)
-  showToast('已取消申请')
-}
-
-const onApprove = () => {
-  approveAfterSale(ticket.value.id)
-  showToast(ticket.value.type === '仅退款' ? '商家已同意，正在退款' : '商家已同意，请寄回商品')
-}
-
-const onReject = async () => {
-  await showConfirmDialog({ title: '模拟拒绝', message: '将模拟商家拒绝该售后申请' })
-  rejectAfterSale(ticket.value.id)
-  showToast('商家已拒绝')
-}
-
-const onReturn = () => {
-  const result = submitReturnExpress(ticket.value.id, expressNo.value)
-  if (!result.ok) {
-    showToast(result.message)
-    return
-  }
-  showToast('已提交退货物流')
-}
-
-const onComplete = () => {
-  completeAfterSale(ticket.value.id)
-  showToast(ticket.value.type === '换货' ? '换货已完成' : '退款已完成')
-}
-
-const previewImages = (index) => {
-  const images = ticket.value?.images || []
-  if (!images.length) return
-  showImagePreview({ images, startPosition: index })
-}
 
 const statusTip = computed(() => {
-  const map = {
-    待审核: '商家正在审核你的售后申请',
-    待退货: '请按提示寄回商品并填写运单号',
-    处理中: '商家正在处理售后',
-    已完成: '本次售后已完成',
-    已拒绝: '商家未通过本次售后申请',
-    已取消: '你已取消本次售后申请',
-  }
-  return map[ticket.value?.status] || ''
+  const s = ticket.value?.status
+  if (s === '待审核') return '商家正在审核您的售后申请'
+  if (s === '待退货') return '请按要求寄回商品并填写快递单号'
+  if (s === '处理中') return '商家正在处理您的售后'
+  if (s === '已完成') return '售后已完成'
+  if (s === '已拒绝') return '售后申请已被拒绝'
+  if (s === '已取消') return '您已取消该售后'
+  return ''
 })
+
+const load = async () => {
+  const data = await getAfterSaleDetail(route.params.id)
+  ticket.value = data.ticket
+}
+
+const onCancel = async () => {
+  await showConfirmDialog({ title: '取消售后' })
+  await cancelAfterSale(route.params.id)
+  showToast('已取消')
+  await load()
+}
+
+const onReturn = async () => {
+  if (!expressNo.value.trim()) { showToast('请填写快递单号'); return }
+  await submitReturnExpress(route.params.id, {
+    returnExpressName: expressName.value,
+    returnExpressNo: expressNo.value.trim(),
+  })
+  showToast('已提交物流')
+  await load()
+}
+
+onMounted(load)
 </script>
 
 <template>
@@ -83,27 +63,12 @@ const statusTip = computed(() => {
       <van-cell title="申请原因" :value="ticket.reason" />
       <van-cell v-if="ticket.description" title="补充说明" :value="ticket.description" />
       <van-cell v-if="ticket.refundAmount" title="退款金额" :value="`¥${ticket.refundAmount}`" />
-      <van-cell v-if="ticket.returnExpressNo" title="退货物流" :value="`${ticket.returnExpressName} ${ticket.returnExpressNo}`" />
-    </section>
-
-    <section v-if="ticket.images?.length" class="card">
-      <h3>凭证图片</h3>
-      <div class="photos">
-        <button
-          v-for="(url, index) in ticket.images"
-          :key="index"
-          type="button"
-          class="photo"
-          @click="previewImages(index)"
-        >
-          <img :src="url" alt="售后凭证" />
-        </button>
-      </div>
+      <van-cell v-if="ticket.returnExpressNo" title="退货物流" :value="`${ticket.returnExpressName || ''} ${ticket.returnExpressNo}`" />
     </section>
 
     <section class="card">
       <h3>售后商品</h3>
-      <div v-for="item in ticket.goodsList" :key="`${item.goodsId}-${item.spec}`" class="goods" @click="router.push(`/goods/${item.goodsId}`)">
+      <div v-for="item in (ticket.goodsList || [])" :key="`${item.goodsId}-${item.spec}`" class="goods" @click="router.push(`/goods/${item.goodsId}`)">
         <img :src="item.image" :alt="item.name" />
         <div>
           <strong>{{ item.name }}</strong>
@@ -115,26 +80,21 @@ const statusTip = computed(() => {
 
     <section v-if="ticket.status === '待退货'" class="card">
       <h3>填写退货物流</h3>
-      <van-field v-model="expressNo" label="快递单号" placeholder="请输入寄回运单号" />
+      <van-field v-model="expressName" label="快递公司" placeholder="如：顺丰速运" />
+      <van-field v-model="expressNo" label="快递单号" placeholder="请输入寄回单号" />
     </section>
 
-    <section class="card">
-      <h3>售后跟踪</h3>
+    <section v-if="ticket.logs?.length" class="card">
+      <h3>售后进度</h3>
       <van-steps direction="vertical" :active="0">
         <van-step v-for="(log, index) in [...ticket.logs].reverse()" :key="index">{{ log }}</van-step>
       </van-steps>
     </section>
 
     <div class="bar fixed-bottom-bar">
-      <van-button v-if="ticket.status === '待审核'" @click="onCancel">取消申请</van-button>
-      <van-button v-if="ticket.status === '待审核'" @click="onReject">模拟拒绝</van-button>
-      <van-button v-if="ticket.status === '待审核'" type="primary" @click="onApprove">模拟通过</van-button>
-      <van-button v-if="ticket.status === '待退货'" @click="onReject">模拟拒绝</van-button>
+      <van-button v-if="ticket.status === '待审核' || ticket.status === '待退货'" @click="onCancel">取消申请</van-button>
       <van-button v-if="ticket.status === '待退货'" type="primary" @click="onReturn">提交物流</van-button>
-      <van-button v-if="ticket.status === '处理中'" type="primary" @click="onComplete">模拟完成</van-button>
-      <van-button v-else-if="['已完成', '已拒绝', '已取消'].includes(ticket.status)" type="primary" @click="router.push('/after-sales')">
-        返回列表
-      </van-button>
+      <van-button v-else-if="['已完成', '已拒绝', '已取消'].includes(ticket.status)" type="primary" @click="router.push('/after-sales')">返回列表</van-button>
     </div>
   </div>
   <van-empty v-else description="售后单不存在">
@@ -143,111 +103,17 @@ const statusTip = computed(() => {
 </template>
 
 <style scoped>
-.page {
-  min-height: 100vh;
-  padding-bottom: 72px;
-}
-
-.status {
-  padding: 20px 16px;
-  background: var(--brand-gradient);
-  color: #fff;
-}
-
-.status h2,
-.status p {
-  margin: 0;
-}
-
-.status p {
-  margin-top: 6px;
-  opacity: 0.86;
-}
-
-.card {
-  margin: 12px;
-  padding: 14px;
-  background: #fff;
-  border-radius: 16px;
-}
-
-h3 {
-  margin: 0 0 8px;
-}
-
-.goods {
-  display: grid;
-  grid-template-columns: 64px 1fr auto;
-  gap: 10px;
-  padding: 8px 0 12px;
-}
-
-.goods img {
-  width: 64px;
-  height: 64px;
-  object-fit: cover;
-  border-radius: 10px;
-}
-
-.goods p {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.photos {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.photo {
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-.photo img {
-  width: 72px;
-  height: 72px;
-  object-fit: cover;
-  border-radius: 10px;
-}
-
+.page { min-height: 100vh; padding-bottom: 72px; }
+.status { padding: 20px 16px; background: var(--brand-gradient); color: #fff; }
+.status h2, .status p { margin: 0; }
+.status p { margin-top: 6px; opacity: .86; }
+.card { margin: 12px; padding: 14px; background: #fff; border-radius: 16px; }
+h3 { margin: 0 0 8px; }
+.goods { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; padding: 8px 0; }
+.goods img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: #eef2ff; }
+.goods p { margin: 6px 0 0; color: #98a0b3; font-size: 12px; }
 .bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  background: #fff;
-}
-
-@media (min-width: 960px) {
-  .page {
-    width: min(860px, calc(100% - 48px));
-    margin: 0 auto;
-    padding: 0 0 96px;
-  }
-
-  .status {
-    border-radius: 16px;
-    margin-top: 8px;
-    padding: 28px 24px;
-  }
-
-  .card {
-    margin: 16px 0 0;
-    padding: 20px;
-  }
-
-  .bar {
-    height: 72px;
-    align-items: center;
-  }
+  position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: flex-end; gap: 8px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #fff;
 }
 </style>

@@ -1,8 +1,8 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showImagePreview, showToast } from 'vant'
-import { getGoodsById } from '@/composables/useGoods'
+import { fetchGoodsDetail } from '@/composables/useGoods'
 import { addToCart, prepareBuyNow } from '@/composables/useCart'
 import { useUser } from '@/composables/useUser'
 
@@ -13,474 +13,267 @@ const skuVisible = ref(false)
 const skuAction = ref('cart')
 const spec = ref('')
 const qty = ref(1)
-
-const goods = computed(() => getGoodsById(route.params.id))
-const specRows = computed(() => {
-  const specs = goods.value?.specs?.[0] || {}
-  return [
-    { label: '处理器', value: specs.cpu },
-    { label: '屏幕', value: specs.screen },
-    { label: '内存', value: specs.memory },
-    { label: '品牌', value: goods.value?.brand },
-    { label: '型号', value: goods.value?.model },
-    { label: '存储', value: specs.disk },
-    { label: '电池', value: specs.battery },
-    { label: '保修', value: specs.warranty, accent: true },
-  ].filter((item) => item.value && item.value !== '-')
+const detail = ref(null)
+const paramsExpanded = ref(false)
+const goods = computed(() => detail.value?.goods || null)
+const images = computed(() => {
+  const imgs = detail.value?.images || []
+  if (imgs.length) return imgs.map((i) => i.url || i).filter(Boolean)
+  return goods.value?.coverImage ? [goods.value.coverImage] : []
 })
+const skus = computed(() => detail.value?.skus || [])
+const reviews = computed(() => detail.value?.reviews || [])
+const shopName = computed(() => detail.value?.shopName || goods.value?.shopName || '')
 
-watch(
-  goods,
-  (item) => {
-    const options = item?.skuOptions || []
-    if (!options.includes(spec.value)) {
-      spec.value = options[0] || ''
-    }
-    qty.value = 1
-  },
-  { immediate: true },
-)
-
-const openSku = (action) => {
-  if (!goods.value) return
-  skuAction.value = action
-  qty.value = 1
-  skuVisible.value = true
+/** 解析商品参数：兼容数组 [{label,value}] / 扁平对象 / {items:[]} */
+const parseParams = (raw) => {
+  if (!raw) return []
+  let data = raw
+  if (typeof raw === 'string') {
+    const t = raw.trim()
+    if (!t || t === '[]' || t === '{}' || t.toLowerCase() === 'null') return []
+    try { data = JSON.parse(t) } catch { return [] }
+  }
+  if (Array.isArray(data)) {
+    return data
+      .map((p, i) => {
+        if (!p || typeof p !== 'object') return null
+        const label = String(p.label || p.key || p.name || '').trim()
+        const value = p.value == null ? '' : String(p.value).trim()
+        if (!label && !value) return null
+        return { key: String(p.key || `p${i}`), label: label || `参数${i + 1}`, value }
+      })
+      .filter(Boolean)
+  }
+  if (data && typeof data === 'object') {
+    if (Array.isArray(data.items)) return parseParams(data.items)
+    return Object.entries(data)
+      .filter(([k, v]) => k !== 'items' && v != null && typeof v !== 'object')
+      .map(([k, v]) => ({ key: k, label: k, value: String(v).trim() }))
+      .filter((p) => p.label || p.value)
+  }
+  return []
 }
 
-const confirmSku = () => {
-  if (!goods.value) return
-  if (skuAction.value === 'cart') {
-    addToCart(goods.value, { qty: qty.value, spec: spec.value })
-    skuVisible.value = false
-    showToast('已加入购物车')
-    return
-  }
+const goodsParams = computed(() => {
+  const g = goods.value
+  if (!g) return []
+  if (Array.isArray(g.params) && g.params.length) return parseParams(g.params)
+  return parseParams(g.specJson)
+})
+
+/** 图文详情去掉内嵌的「核心参数/商品参数」表格，避免与独立卡片重复 */
+const detailHtml = computed(() => {
+  const html = goods.value?.detailText || ''
+  if (!html) return ''
+  return html
+    .replace(/<h3[^>]*>\s*(核心参数|商品参数)\s*<\/h3>\s*<table[\s\S]*?<\/table>/gi, '')
+    .replace(/<(h3|h2|p|div)[^>]*>\s*(核心参数|商品参数)\s*<\/\1>/gi, '')
+})
+
+const skuOptions = computed(() => skus.value.map((s) => s.skuName).filter(Boolean))
+const currentPrice = computed(() => {
+  const sku = skus.value.find((s) => s.skuName === spec.value)
+  return sku?.price ?? goods.value?.salePrice ?? 0
+})
+
+const openSku = (action) => {
   if (!isLogin.value) {
-    skuVisible.value = false
     router.push({ path: '/login', query: { redirect: route.fullPath } })
     return
   }
-  prepareBuyNow(goods.value, { qty: qty.value, spec: spec.value })
+  skuAction.value = action
+  if (!spec.value && skuOptions.value[0]) spec.value = skuOptions.value[0]
+  if (!spec.value) spec.value = '标准款'
+  skuVisible.value = true
+}
+const confirmSku = async () => {
+  if (!goods.value) return
+  const sku = skus.value.find((s) => s.skuName === spec.value) || skus.value[0]
+  const payload = {
+    goodsId: goods.value.id,
+    skuId: sku?.id,
+    spec: sku?.skuName || spec.value || '标准款',
+    quantity: qty.value,
+    name: goods.value.name,
+    image: goods.value.coverImage,
+    price: sku?.price || goods.value.salePrice,
+    stock: sku?.stock ?? goods.value.stock,
+    shopName: shopName.value,
+  }
+  if (skuAction.value === 'cart') {
+    await addToCart(payload)
+    showToast('已加入购物车')
+  } else {
+    prepareBuyNow(payload)
+    router.push('/checkout')
+  }
   skuVisible.value = false
-  router.push('/checkout')
 }
-
-const previewReview = (images, index) => {
-  if (!images?.length) return
-  showImagePreview({ images, startPosition: index })
+const preview = (i) => showImagePreview({ images: images.value, startPosition: i })
+const load = async () => {
+  paramsExpanded.value = false
+  detail.value = await fetchGoodsDetail(route.params.id)
+  if (!spec.value && skuOptions.value[0]) spec.value = skuOptions.value[0]
 }
+watch(() => route.params.id, load)
+onMounted(load)
 </script>
 
 <template>
   <div v-if="goods" class="detail">
     <van-nav-bar title="商品详情" left-arrow @click="router.back()" />
     <h2 class="pc-title">商品详情</h2>
-    <div class="detail-main">
     <van-swipe class="gallery" :autoplay="4000" indicator-color="#fff">
-      <van-swipe-item v-for="(url, index) in goods.images" :key="index">
+      <van-swipe-item v-for="(url, index) in images" :key="index" @click="preview(index)">
         <img :src="url" :alt="goods.name" />
       </van-swipe-item>
     </van-swipe>
 
     <section class="card price-card">
       <div class="price-row">
-        <span class="price"><em>¥</em>{{ goods.salePrice }}</span>
-        <del>¥{{ goods.marketPrice }}</del>
+        <span class="price"><em>¥</em>{{ currentPrice }}</span>
+        <del v-if="goods.marketPrice">¥{{ goods.marketPrice }}</del>
       </div>
       <h1>{{ goods.name }}</h1>
       <p>{{ goods.description }}</p>
       <div class="meta">
-        <span>{{ goods.shopName }}</span>
-        <span>已售 {{ goods.sales }}</span>
-        <span>库存 {{ goods.stock }}</span>
+        <span>{{ shopName }}</span>
+        <span>销量 {{ goods.sales || 0 }}</span>
+        <span>库存 {{ goods.stock || 0 }}</span>
       </div>
-      <div class="sku-inline">
-        <h4>规格</h4>
+    </section>
+
+    <section class="card">
+      <van-cell title="已选规格" :value="spec || '请选择'" is-link @click="openSku('cart')" />
+    </section>
+
+    <section v-if="reviews.length" class="card">
+      <div class="block-head">
+        <h3>用户评价</h3>
+        <span>{{ reviews.length }}+条</span>
+      </div>
+      <div v-for="r in reviews.slice(0, 3)" :key="r.id" class="review">
+        <strong>{{ r.anonymous === 1 ? '匿名用户' : (r.userName || '用户') }}</strong>
+        <van-rate :model-value="r.star || 5" readonly size="12" />
+        <p>{{ r.content }}</p>
+      </div>
+    </section>
+
+    <section class="card params-card" v-if="goodsParams.length">
+      <h3>商品参数</h3>
+      <div class="param-list" :class="{ collapsed: !paramsExpanded && goodsParams.length > 2 }">
+        <div v-for="(p, idx) in goodsParams" :key="p.key || idx" class="param-row">
+          <span class="param-label">{{ p.label }}</span>
+          <span class="param-value">{{ p.value || '-' }}</span>
+        </div>
+      </div>
+      <button
+        v-if="!paramsExpanded && goodsParams.length > 2"
+        type="button"
+        class="param-expand-hint"
+        @click="paramsExpanded = true"
+        aria-label="展开全部参数"
+      >
+        <span class="chevron"></span>
+      </button>
+    </section>
+
+    <section class="card" v-if="detailHtml">
+      <h3>图文详情</h3>
+      <div class="rich" v-html="detailHtml"></div>
+    </section>
+
+    <div class="bar fixed-bottom-bar">
+      <van-button round type="warning" @click="openSku('cart')">加入购物车</van-button>
+      <van-button round type="danger" @click="openSku('buy')">立即购买</van-button>
+    </div>
+
+    <van-action-sheet v-model:show="skuVisible" title="选择规格">
+      <div class="sku-panel">
         <div class="options">
           <button
-            v-for="item in goods.skuOptions"
+            v-for="item in (skuOptions.length ? skuOptions : ['标准款'])"
             :key="item"
             type="button"
             :class="{ active: spec === item }"
             @click="spec = item"
-          >
-            {{ item }}
-          </button>
+          >{{ item }}</button>
         </div>
-      </div>
-      <div class="pc-actions">
-        <van-button round type="warning" @click="openSku('cart')">加入购物车</van-button>
-        <van-button round type="danger" @click="openSku('buy')">立即购买</van-button>
-      </div>
-    </section>
-
-    <section class="card spec-card">
-      <h3>商品参数</h3>
-      <div class="param-grid">
-        <div v-for="item in specRows" :key="item.label" class="param-item">
-          <span>{{ item.label }}</span>
-          <strong :class="{ accent: item.accent }">{{ item.value }}</strong>
-        </div>
-      </div>
-    </section>
-
-    <section class="card review-card">
-      <h3>用户评价{{ goods.reviews?.length ? `（${goods.reviews.length}）` : '' }}</h3>
-      <div v-for="item in goods.reviews" :key="item.id" class="review">
-        <div class="review-head">
-          <strong>{{ item.userName }}</strong>
-          <van-rate :model-value="item.star" size="12" readonly color="#f59e0b" />
-        </div>
-        <p>{{ item.content }}</p>
-        <div v-if="item.images?.length" class="review-photos">
-          <button
-            v-for="(url, index) in item.images"
-            :key="index"
-            type="button"
-            @click="previewReview(item.images, index)"
-          >
-            <img :src="url" alt="评价图片" />
-          </button>
-        </div>
-        <span>{{ item.createdAt }}</span>
-      </div>
-    </section>
-
-    <section class="card intro-card">
-      <h3>商品介绍</h3>
-      <p class="intro">{{ goods.detailText }}</p>
-      <img v-for="(url, index) in goods.images" :key="index" :src="url" :alt="goods.name" />
-    </section>
-    </div>
-
-    <van-action-bar class="mobile-action-bar">
-      <van-action-bar-icon icon="shop-o" text="店铺" @click="router.push('/home')" />
-      <van-action-bar-icon icon="cart-o" text="购物车" @click="router.push('/cart')" />
-      <van-action-bar-button type="warning" text="加入购物车" @click="openSku('cart')" />
-      <van-action-bar-button type="danger" text="立即购买" @click="openSku('buy')" />
-    </van-action-bar>
-
-    <van-popup v-model:show="skuVisible" class="sku-popup" round position="bottom">
-      <div class="sku">
-        <div class="sku-goods">
-          <img :src="goods.image" :alt="goods.name" />
-          <div>
-            <strong>{{ goods.name }}</strong>
-            <p class="price"><em>¥</em>{{ goods.salePrice }}</p>
-          </div>
-        </div>
-        <div class="qty">
+        <div class="qty-row">
           <span>数量</span>
-          <van-stepper v-model="qty" min="1" :max="goods.stock" />
+          <van-stepper v-model="qty" min="1" :max="Math.max(1, goods.stock || 99)" />
         </div>
-        <van-button type="primary" round block @click="confirmSku">
+        <van-button type="primary" block round @click="confirmSku">
           {{ skuAction === 'cart' ? '加入购物车' : '立即购买' }}
         </van-button>
       </div>
-    </van-popup>
+    </van-action-sheet>
   </div>
-  <van-empty v-else description="商品不存在">
-    <van-button round type="primary" size="small" to="/home">返回首页</van-button>
-  </van-empty>
+  <van-empty v-else description="商品不存在或已下架" />
 </template>
 
 <style scoped>
-.detail {
-  padding-bottom: 64px;
+.detail { min-height: 100vh; padding-bottom: 72px; }
+.gallery { height: 360px; background: #fff; }
+.gallery img { width: 100%; height: 360px; object-fit: cover; }
+.card { margin: 12px; background: #fff; border-radius: 16px; padding: 14px; }
+.price { color: #ef4444; font-size: 24px; font-weight: 700; }
+.price em { font-style: normal; font-size: 14px; }
+.price-row { display: flex; align-items: baseline; gap: 10px; }
+.price-row del { color: #98a0b3; font-size: 13px; }
+h1 { margin: 10px 0 8px; font-size: 18px; }
+.card > p, .review p { margin: 0; color: #4a5160; font-size: 13px; line-height: 1.6; }
+.meta { display: flex; gap: 12px; margin-top: 10px; color: #98a0b3; font-size: 12px; }
+.block-head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.block-head h3, .card h3 { margin: 0 0 10px; }
+.review { padding: 8px 0; border-top: 1px solid #f3f5fb; }
+.review strong { margin-right: 8px; font-size: 13px; }
+.rich :deep(img) { max-width: 100%; border-radius: 8px; }
+.params-card h3 { margin: 0 0 12px; font-size: 16px; }
+.params-card { position: relative; }
+.param-list { display: flex; flex-direction: column; gap: 0; }
+.param-list.collapsed {
+  max-height: 100px; /* ~2.5 rows */
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
 }
-
-.gallery img {
-  width: 100%;
-  height: 360px;
-  object-fit: cover;
-  background: #fff;
+.param-row {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid #f3f5fb; font-size: 13px;
+  min-height: 20px; box-sizing: content-box;
 }
-
-.card {
-  margin: 12px;
-  padding: 14px;
-  background: #fff;
-  border-radius: 16px;
+.param-row:last-child { border-bottom: none; padding-bottom: 0; }
+.param-label { color: #98a0b3; flex: 0 0 36%; }
+.param-value { color: #1f2937; text-align: right; flex: 1; word-break: break-all; }
+.param-expand-hint {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; margin-top: 4px; padding: 6px 0 0;
+  border: none; background: transparent; cursor: pointer;
 }
-
-.price-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+.param-expand-hint .chevron {
+  width: 12px; height: 12px;
+  border-right: 2px solid #98a0b3;
+  border-bottom: 2px solid #98a0b3;
+  transform: rotate(45deg);
+  transform-origin: center;
+  animation: param-chevron-bounce 1.1s ease-in-out infinite;
 }
-
-.price {
-  font-size: 24px;
+@keyframes param-chevron-bounce {
+  0%, 100% { transform: rotate(45deg) scale(0.85) translateY(-1px); opacity: 0.55; }
+  50% { transform: rotate(45deg) scale(1.25) translateY(2px); opacity: 1; }
 }
-
-del {
-  color: #b4b9c5;
+.bar {
+  position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 10px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #fff;
 }
-
-h1 {
-  margin: 10px 0 8px;
-  font-size: 18px;
-}
-
-.price-card p,
-.intro {
-  color: #667085;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.meta {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 12px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-h3 {
-  margin: 0 0 8px;
-  font-size: 15px;
-}
-
-.spec-card h3 {
-  font-size: 18px;
-}
-
-.param-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px 16px;
-  padding: 8px 0 4px;
-}
-
-.param-item span {
-  display: block;
-  color: #9aa1ae;
-  font-size: 13px;
-}
-
-.param-item strong {
-  display: block;
-  margin-top: 8px;
-  color: #1f2430;
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.3;
-  word-break: break-all;
-}
-
-.param-item strong.accent {
-  color: #6d6ef6;
-}
-
-.review {
-  padding: 10px 0;
-  border-top: 1px solid #f3f5fb;
-}
-
-.review-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.review p {
-  margin: 8px 0 6px;
-  font-size: 13px;
-}
-
-.review span {
-  color: #a0a6b3;
-  font-size: 12px;
-}
-
-.review-photos {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 8px 0;
-}
-
-.review-photos button {
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-.review-photos img {
-  width: 64px;
-  height: 64px;
-  margin-top: 0;
-  border-radius: 8px;
-  object-fit: cover;
-}
-
-.card img {
-  width: 100%;
-  border-radius: 12px;
-  margin-top: 10px;
-}
-
-:deep(.van-action-bar) {
-  left: 0;
-  right: 0;
-  transform: none;
-  max-width: none;
-}
-
-.sku-inline {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid #f3f5fb;
-}
-
-.sku-inline h4,
-.sku h4 {
-  margin: 0 0 10px;
-  font-size: 14px;
-}
-
-.sku {
-  padding: 20px 16px 24px;
-}
-
-.sku-goods {
-  display: grid;
-  grid-template-columns: 84px 1fr;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.sku-goods img {
-  width: 84px;
-  height: 84px;
-  border-radius: 10px;
-  object-fit: cover;
-}
-
-.options {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
+.bar .van-button { flex: 1; }
+.sku-panel { padding: 12px 16px 24px; }
+.options { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .options button {
-  border: 0;
-  background: #f4f7ff;
-  border-radius: 999px;
-  padding: 6px 12px;
+  border: 1px solid #e5e7ef; background: #f7f8fc; border-radius: 999px; padding: 6px 12px;
 }
-
-.options button.active {
-  background: #e8eeff;
-  color: var(--brand-blue);
-  font-weight: 700;
-}
-
-.qty {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 18px 0;
-}
-
-.pc-actions {
-  display: none;
-}
-
-@media (min-width: 960px) {
-  .detail {
-    width: min(var(--app-max), calc(100% - 48px));
-    margin: 0 auto;
-    padding: 0 0 48px;
-  }
-
-  .detail-main {
-    display: grid;
-    grid-template-columns: minmax(360px, 480px) 1fr;
-    gap: 20px;
-    align-items: start;
-  }
-
-  .gallery {
-    grid-column: 1;
-    grid-row: 1 / span 2;
-    border-radius: 16px;
-    overflow: hidden;
-  }
-
-  .gallery img {
-    height: 480px;
-  }
-
-  .card {
-    margin: 0;
-  }
-
-  .price-card {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .spec-card {
-    grid-column: 2;
-    grid-row: 2;
-  }
-
-  .review-card,
-  .intro-card {
-    grid-column: 1 / -1;
-  }
-
-  .spec-card h3 {
-    margin-bottom: 12px;
-    font-size: 24px;
-  }
-
-  .param-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 28px 24px;
-    padding: 12px 8px 8px;
-  }
-
-  .param-item span {
-    font-size: 14px;
-  }
-
-  .param-item strong {
-    font-size: 22px;
-  }
-
-  h1 {
-    font-size: 28px;
-  }
-
-  .sku-inline h4 {
-    font-size: 16px;
-  }
-
-  .pc-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 24px;
-  }
-
-  .pc-actions .van-button {
-    width: 160px;
-    height: 44px;
-  }
-
-  .mobile-action-bar {
-    display: none !important;
-  }
-
-  :deep(.sku-popup) {
-    width: 480px;
-    left: 50%;
-    right: auto;
-    transform: translateX(-50%);
-  }
-}
-
+.options button.active { border-color: #4d7cff; color: #4d7cff; background: #eef2ff; }
+.qty-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 </style>

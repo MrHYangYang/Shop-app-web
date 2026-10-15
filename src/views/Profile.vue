@@ -1,31 +1,33 @@
 <script setup>
-import { reactive } from 'vue'
+import { onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { updateProfile, useUser } from '@/composables/useUser'
+import { refreshProfile, updateProfile, changePassword, useUser } from '@/composables/useUser'
 
 const router = useRouter()
-const { user } = useUser()
-const form = reactive({
-  name: user.value?.name || '',
-  gender: user.value?.gender || '男',
-  phone: user.value?.phone || '',
-})
-
-const onSave = () => {
-  if (!form.name.trim()) {
-    showToast('请输入昵称')
-    return
-  }
-  updateProfile({ name: form.name.trim(), gender: form.gender })
-  showToast('保存成功')
-  router.back()
+const goBack = () => {
+  if (window.history.state && window.history.state.back != null) router.back()
+  else router.replace('/mine')
 }
+const { user } = useUser()
+const form = reactive({ name: '', gender: '保密', avatar: '' })
+const pwd = reactive({ oldPassword: '', newPassword: '', confirm: '' })
+const save = async () => { await updateProfile(form); showToast('保存成功') }
+const savePwd = async () => {
+  if (pwd.newPassword !== pwd.confirm) { showToast('两次密码不一致'); return }
+  await changePassword(pwd)
+  showToast('密码已修改')
+  pwd.oldPassword=''; pwd.newPassword=''; pwd.confirm=''
+}
+onMounted(async () => {
+  const p = await refreshProfile()
+  if (p) Object.assign(form, { name: p.name || '', gender: p.gender || '保密', avatar: p.avatar || '' })
+})
 </script>
 
 <template>
   <div class="page">
-    <van-nav-bar title="个人资料" left-arrow @click="router.back()" />
+    <van-nav-bar title="个人资料" left-arrow @click-left="goBack" />
     <h2 class="pc-title">个人资料</h2>
     <div class="avatar">{{ form.name.slice(0, 1) || '优' }}</div>
     <van-form @submit="onSave">

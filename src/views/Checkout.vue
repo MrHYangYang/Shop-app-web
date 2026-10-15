@@ -1,23 +1,20 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { getGoodsById } from '@/composables/useGoods'
 import { useCart } from '@/composables/useCart'
 import { useAddress } from '@/composables/useAddress'
 import { createOrder } from '@/composables/useOrders'
 
 const router = useRouter()
-const { checkoutItems, checkoutAmount, completeCheckout, updateCheckoutQty } = useCart()
-const { defaultAddress } = useAddress()
+const { checkoutItems, checkoutAmount, completeCheckout, updateCheckoutQty, loadCart } = useCart()
+const { defaultAddress, loadAddresses } = useAddress()
 const payType = ref('微信支付')
 const submitting = ref(false)
-
 const goodsList = computed(() => checkoutItems.value)
+const stockOf = (item) => Math.max(1, Number(item.stock || 99))
 
-const stockOf = (item) => getGoodsById(item.goodsId)?.stock || 99
-
-const submit = () => {
+const submit = async () => {
   if (!goodsList.value.length) {
     showToast('请先选择商品')
     router.replace('/cart')
@@ -29,18 +26,30 @@ const submit = () => {
     return
   }
   submitting.value = true
-  window.setTimeout(() => {
-    const order = createOrder({
-      goodsList: goodsList.value,
-      address: defaultAddress.value,
+  try {
+    const orders = await createOrder({
+      addressId: defaultAddress.value.id,
       payType: payType.value,
+      items: goodsList.value.map((i) => ({
+        goodsId: i.goodsId,
+        skuName: i.spec || i.skuName || '标准版',
+        qty: i.quantity || i.qty || 1,
+      })),
     })
-    completeCheckout()
-    submitting.value = false
+    await completeCheckout()
     showToast('下单成功')
-    router.replace(`/orders/${order.id}`)
-  }, 400)
+    const first = Array.isArray(orders) ? orders[0] : orders
+    router.replace(first?.id ? '/orders/' + first.id : '/orders')
+  } catch (e) {
+    // toast already shown by request interceptor
+  } finally {
+    submitting.value = false
+  }
 }
+
+onMounted(async () => {
+  await Promise.all([loadAddresses(), loadCart()])
+})
 </script>
 
 <template>
@@ -66,7 +75,7 @@ const submit = () => {
           <div class="row">
             <span class="price"><em>¥</em>{{ item.price }}</span>
             <van-stepper
-              :model-value="item.qty"
+              :model-value="item.quantity"
               min="1"
               :max="stockOf(item)"
               @change="(val) => updateCheckoutQty(item.goodsId, item.spec, val)"
@@ -74,6 +83,7 @@ const submit = () => {
           </div>
         </div>
       </div>
+      <van-empty v-if="!goodsList.length" description="暂无待结算商品" />
     </section>
 
     <section class="card">
@@ -99,96 +109,26 @@ const submit = () => {
 </template>
 
 <style scoped>
-.page {
-  min-height: 100vh;
-  padding-bottom: 72px;
-}
-
-.card {
-  margin: 12px;
-  background: #fff;
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-.address {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px;
-}
-
-.address strong {
-  display: block;
-}
-
-.address p {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.goods {
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 10px;
-  padding: 12px;
-}
-
-.goods img {
-  width: 72px;
-  height: 72px;
-  border-radius: 10px;
-  object-fit: cover;
-}
-
-.goods p {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-}
-
+.page { min-height: 100vh; padding-bottom: 72px; }
+.card { margin: 12px; background: #fff; border-radius: 16px; overflow: hidden; }
+.address { display: flex; align-items: center; justify-content: space-between; padding: 16px; }
+.address strong { display: block; }
+.address p { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; }
+.goods { display: grid; grid-template-columns: 72px 1fr; gap: 10px; padding: 12px; }
+.goods img { width: 72px; height: 72px; border-radius: 10px; object-fit: cover; }
+.goods p { color: var(--text-secondary); font-size: 12px; }
+.row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  position: fixed; left: 0; right: 0; bottom: 0; width: 100%;
+  display: flex; align-items: center; justify-content: space-between;
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  background: #fff;
-  box-shadow: 0 -6px 18px rgba(31, 36, 48, 0.06);
+  background: #fff; box-shadow: 0 -6px 18px rgba(31, 36, 48, 0.06);
 }
-
-.bar .van-button {
-  width: 128px;
-}
-
+.bar .van-button { width: 128px; }
 @media (min-width: 960px) {
-  .page {
-    width: min(860px, calc(100% - 48px));
-    margin: 0 auto;
-    padding-bottom: 96px;
-  }
-
-  .card {
-    margin: 0 0 16px;
-  }
-
-  .bar {
-    height: 72px;
-  }
-
-  .bar .van-button {
-    width: 180px;
-  }
+  .page { width: min(860px, calc(100% - 48px)); margin: 0 auto; padding-bottom: 96px; }
+  .card { margin: 0 0 16px; }
+  .bar { height: 72px; }
+  .bar .van-button { width: 180px; }
 }
 </style>

@@ -1,39 +1,47 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onActivated, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog } from 'vant'
-import { useUser } from '@/composables/useUser'
+import { useUser, logout, refreshProfile, hydrateFromStorage } from '@/composables/useUser'
 import { useOrders } from '@/composables/useOrders'
 import { useAfterSales } from '@/composables/useAfterSales'
 import { useReviews } from '@/composables/useReviews'
+import { getToken } from '@/utils/request'
 
 defineOptions({ name: 'Mine' })
-
 const router = useRouter()
-const { user, isLogin, logout } = useUser()
-const { pendingPay, pendingShip, pendingReceive } = useOrders()
-const { pendingCount } = useAfterSales()
+const { user, isLogin } = useUser()
+const { pendingPay, pendingShip, pendingReceive, loadOrders } = useOrders()
+const { pendingCount, loadAfterSales } = useAfterSales()
 const { pendingCount: pendingReviewCount } = useReviews()
-
 const orderMenus = computed(() => [
   { label: '待付款', icon: 'pending-payment', status: '待付款', count: pendingPay.value },
   { label: '待发货', icon: 'logistics', status: '待发货', count: pendingShip.value },
   { label: '待收货', icon: 'send-gift-o', status: '待收货', count: pendingReceive.value },
-  { label: '已完成', icon: 'comment-o', status: '已完成', count: pendingReviewCount.value },
+  { label: '售后', icon: 'after-sale', status: '售后中', count: pendingCount.value },
 ])
-
-const go = (path) => {
-  if (!isLogin.value) {
-    router.push({ path: '/login', query: { redirect: path } })
-    return
-  }
-  router.push(path)
-}
-
+const go = (path) => router.push(path)
 const onLogout = async () => {
-  await showConfirmDialog({ title: '退出登录', message: '确定退出当前账号吗？' })
+  await showConfirmDialog({ title: '退出登录' })
   logout()
+  router.replace('/login')
 }
+
+async function loadMine() {
+  hydrateFromStorage()
+  if (!getToken()) return
+  await refreshProfile().catch(() => {})
+  await Promise.all([
+    loadOrders({ page: 1, size: 50 }).catch(() => {}),
+    loadAfterSales({ page: 1, size: 50 }).catch(() => {}),
+  ])
+}
+
+onMounted(loadMine)
+onActivated(loadMine)
+watch(isLogin, (v) => {
+  if (v) loadMine()
+})
 </script>
 
 <template>
@@ -77,7 +85,7 @@ const onLogout = async () => {
       <van-cell title="退款/售后" is-link icon="refund-o" :value="pendingCount ? `${pendingCount}笔进行中` : ''" @click="go('/after-sales')" />
       <van-cell title="收货地址" is-link icon="location-o" @click="go('/address')" />
       <van-cell title="个人资料" is-link icon="contact" @click="go('/profile')" />
-      <van-cell title="客服帮助" is-link icon="service-o" value="400-800-1000" />
+      <van-cell title="客服帮助" is-link icon="service-o" value="XXX-XXX-XXXX" />
     </section>
 
     <van-button v-if="isLogin" block round class="logout" @click="onLogout">退出登录</van-button>

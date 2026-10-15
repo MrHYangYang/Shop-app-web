@@ -1,15 +1,21 @@
 <script setup>
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { showConfirmDialog } from 'vant'
-import { removeAddress, setDefaultAddress, useAddress } from '@/composables/useAddress'
+import { showConfirmDialog, showToast } from 'vant'
+import { useAddress } from '@/composables/useAddress'
 
 const router = useRouter()
-const { addresses } = useAddress()
-
+const { addresses, loadAddresses, removeAddress, makeDefault } = useAddress()
 const onDelete = async (item) => {
-  await showConfirmDialog({ title: '删除地址', message: '确定删除该收货地址吗？' })
-  removeAddress(item.id)
+  await showConfirmDialog({ title: '删除地址' })
+  await removeAddress(item.id)
+  showToast('已删除')
 }
+const onDefault = async (id) => {
+  await makeDefault(id)
+  showToast('已设为默认')
+}
+onMounted(loadAddresses)
 </script>
 
 <template>
@@ -21,10 +27,10 @@ const onDelete = async (item) => {
         <div class="info" @click="router.push(`/address/edit/${item.id}`)">
           <strong>{{ item.name }} {{ item.phone }}</strong>
           <p>{{ item.region }}{{ item.detail }}</p>
-          <van-tag v-if="item.isDefault" type="primary" plain>默认</van-tag>
+          <van-tag v-if="item.isDefault === 1" type="primary" plain>默认</van-tag>
         </div>
         <div class="ops">
-          <van-button v-if="!item.isDefault" size="mini" @click="setDefaultAddress(item.id)">设为默认</van-button>
+          <van-button v-if="item.isDefault !== 1" size="mini" @click="onDefault(item.id)">设为默认</van-button>
           <van-button size="mini" @click="router.push(`/address/edit/${item.id}`)">编辑</van-button>
           <van-button size="mini" @click="onDelete(item)">删除</van-button>
         </div>
@@ -38,59 +44,14 @@ const onDelete = async (item) => {
 </template>
 
 <style scoped>
-.page {
-  min-height: 100vh;
-  padding-bottom: 80px;
-}
-
-.list {
-  padding: 12px;
-  display: grid;
-  gap: 10px;
-}
-
-.card {
-  background: #fff;
-  border-radius: 16px;
-  padding: 14px;
-}
-
-.info strong {
-  display: block;
-}
-
-.info p {
-  margin: 8px 0;
-  color: #4a5160;
-  font-size: 13px;
-}
-
-.ops {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
+.page { min-height: 100vh; padding-bottom: 80px; }
+.list { padding: 12px; display: grid; gap: 10px; }
+.card { background: #fff; border-radius: 16px; padding: 14px; }
+.info strong { display: block; }
+.info p { margin: 6px 0; color: var(--text-secondary); font-size: 13px; }
+.ops { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 .bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
   background: #fff;
-}
-
-@media (min-width: 960px) {
-  .page {
-    width: min(860px, calc(100% - 48px));
-    margin: 0 auto;
-    padding-bottom: 100px;
-  }
-
-  .list {
-    padding: 8px 0 24px;
-    grid-template-columns: 1fr 1fr;
-  }
 }
 </style>

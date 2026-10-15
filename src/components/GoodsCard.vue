@@ -1,6 +1,22 @@
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   goods: { type: Object, required: true },
+  hideHotTag: { type: Boolean, default: false },
+  hideNewTag: { type: Boolean, default: false },
+  /** 隐藏全部状态标签（热销/新品/推荐） */
+  hideTags: { type: Boolean, default: false },
+})
+
+/** 移动端只展示一个标签：推荐 > 热销 > 新品 */
+const statusTag = computed(() => {
+  if (props.hideTags) return null
+  const g = props.goods || {}
+  if (g.recommend) return { key: 'recommend', text: '推荐', cls: 'tag-rec' }
+  if (g.hot && !props.hideHotTag) return { key: 'hot', text: '热销', cls: 'tag-hot' }
+  if (g.isNew && !props.hideNewTag) return { key: 'new', text: '新品', cls: 'tag-new' }
+  return null
 })
 </script>
 
@@ -8,11 +24,13 @@ defineProps({
   <router-link class="goods-card" :to="`/goods/${goods.id}`">
     <div class="thumb">
       <img :src="goods.image" :alt="goods.name" />
-      <span v-if="goods.hot" class="tag">热销</span>
+      <div v-if="statusTag" class="tags">
+        <span class="tag" :class="statusTag.cls">{{ statusTag.text }}</span>
+      </div>
     </div>
     <div class="info">
       <h3>{{ goods.name }}</h3>
-      <p>{{ goods.shopName }}</p>
+      <p v-if="goods.shopName" class="shop-name">{{ goods.shopName }}</p>
       <div class="row">
         <span class="price"><em>¥</em>{{ goods.price }}</span>
         <span class="sales">已售 {{ goods.sales }}</span>
@@ -50,16 +68,27 @@ defineProps({
   object-fit: cover;
 }
 
-.tag {
+.tags {
   position: absolute;
   left: 8px;
   top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: calc(100% - 16px);
+}
+
+.tag {
   padding: 2px 8px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #ff7a59, #ef4444);
   color: #fff;
   font-size: 11px;
+  line-height: 1.4;
 }
+
+.tag-hot { background: linear-gradient(135deg, #ff7a59, #ef4444); }
+.tag-rec { background: linear-gradient(135deg, #4d7cff, #7c5cff); }
+.tag-new { background: linear-gradient(135deg, #22c3c8, #10b981); }
 
 .info {
   padding: 10px 10px 12px;
@@ -76,10 +105,14 @@ h3 {
   -webkit-box-orient: vertical;
 }
 
-p {
+.shop-name {
   margin: 6px 0 8px;
-  color: var(--text-secondary);
+  color: var(--text-secondary, #98a0b3);
   font-size: 11px;
+  line-height: 1.3;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .row {

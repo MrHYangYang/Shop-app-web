@@ -1,53 +1,21 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { showConfirmDialog, showImagePreview, showToast } from 'vant'
-import { removeReview, useReviews } from '@/composables/useReviews'
+import { onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useReviews } from '@/composables/useReviews'
 
-const route = useRoute()
 const router = useRouter()
-const { myReviews, pendingItems } = useReviews()
-const tabs = [
-  { name: 'pending', title: '待评价' },
-  { name: 'done', title: '已评价' },
-]
-const active = ref(route.query.tab === 'done' ? 'done' : 'pending')
-
-watch(
-  () => route.query.tab,
-  (tab) => {
-    active.value = tab === 'done' ? 'done' : 'pending'
-  },
-)
-
-const list = computed(() => (active.value === 'done' ? myReviews.value : pendingItems.value))
-
-const onTab = (name) => {
-  router.replace({ path: '/reviews', query: name === 'pending' ? {} : { tab: name } })
+const goBack = () => {
+  if (window.history.state && window.history.state.back != null) router.back()
+  else router.replace('/mine')
 }
 
-const goWrite = (item) => {
-  router.push({
-    path: `/reviews/write/${item.orderId}/${item.goodsId}`,
-    query: { spec: item.spec },
-  })
-}
-
-const previewImages = (images, index) => {
-  if (!images?.length) return
-  showImagePreview({ images, startPosition: index })
-}
-
-const onDelete = async (item) => {
-  await showConfirmDialog({ title: '删除评价', message: '确定删除这条评价吗？' })
-  removeReview(item.id)
-  showToast('已删除评价')
-}
+const { reviews, loadMyReviews } = useReviews()
+onMounted(() => loadMyReviews({ page: 1, size: 50 }))
 </script>
 
 <template>
   <div class="page">
-    <van-nav-bar title="我的评价" left-arrow @click="router.back()" />
+    <van-nav-bar title="我的评价" left-arrow @click-left="goBack" />
     <h2 class="pc-title">我的评价</h2>
     <van-tabs v-model:active="active" @change="onTab">
       <van-tab

@@ -1,32 +1,29 @@
 <script setup>
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
 import { useCart } from '@/composables/useCart'
 import { useUser } from '@/composables/useUser'
 
 defineOptions({ name: 'Cart' })
-
 const router = useRouter()
 const { isLogin } = useUser()
-const { items, allSelected, selectedCount, selectedAmount, updateQty, removeItem, toggleItem, toggleAll, clearBuyNow } = useCart()
-
+const { items, allSelected, selectedCount, selectedAmount, updateQty, removeItem, toggleItem, toggleAll, clearBuyNow, loadCart } = useCart()
 const checkout = async () => {
+  if (!items.value.length) { showToast('购物车是空的'); return }
   if (!selectedCount.value) {
-    showToast('请先选择商品')
-    return
+    await toggleAll(true)
   }
-  if (!isLogin.value) {
-    router.push({ path: '/login', query: { redirect: '/checkout' } })
-    return
-  }
+  if (!selectedCount.value) { showToast('请先选择商品'); return }
+  if (!isLogin.value) { router.push({ path: '/login', query: { redirect: '/checkout' } }); return }
   clearBuyNow()
   router.push('/checkout')
 }
-
 const onDelete = async (item) => {
-  await showConfirmDialog({ title: '删除商品', message: `确定删除「${item.name}」吗？` })
-  removeItem(item.goodsId, item.spec)
+  await showConfirmDialog({ title: '删除商品', message: '确定删除「' + item.name + '」吗？' })
+  await removeItem(item.goodsId, item.spec)
 }
+onMounted(loadCart)
 </script>
 
 <template>
@@ -42,7 +39,7 @@ const onDelete = async (item) => {
           <p>{{ item.spec }} · {{ item.shopName }}</p>
           <div class="row">
             <span class="price"><em>¥</em>{{ item.price }}</span>
-            <van-stepper :model-value="item.qty" min="1" @change="(val) => updateQty(item.goodsId, item.spec, val)" />
+            <van-stepper :model-value="item.quantity" min="1" @change="(val) => updateQty(item.goodsId, item.spec, val)" />
           </div>
         </div>
         <van-icon name="delete-o" class="del" @click="onDelete(item)" />
@@ -57,7 +54,7 @@ const onDelete = async (item) => {
       <div class="sum">
         合计 <span class="price"><em>¥</em>{{ selectedAmount }}</span>
       </div>
-      <van-button type="primary" round :disabled="!selectedCount" @click="checkout">
+      <van-button type="primary" round :disabled="!items.length" @click="checkout">
         结算({{ selectedCount }})
       </van-button>
     </div>

@@ -1,65 +1,45 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
-import { cancelOrder, canApplyAfterSale, confirmOrder, getOrderById, payOrder, shipOrder } from '@/composables/useOrders'
-import { getActiveAfterSale, getAfterSaleByOrderId } from '@/composables/useAfterSales'
-import { getOrderPendingItems } from '@/composables/useReviews'
-import { useUser } from '@/composables/useUser'
+import { cancelOrder, canApplyAfterSale, confirmOrder, getOrderDetail, payOrder } from '@/composables/useOrders'
+import { getActiveAfterSale, loadAfterSales } from '@/composables/useAfterSales'
+import { getOrderPendingItems, loadMyReviews } from '@/composables/useReviews'
+import { prepareBuyNow } from '@/composables/useCart'
 
 const route = useRoute()
 const router = useRouter()
-const { user } = useUser()
-const order = computed(() => getOrderById(route.params.id))
-const pendingReviews = computed(() => (order.value ? getOrderPendingItems(order.value.id, user.value?.phone) : []))
-
-const onPay = () => {
-  payOrder(order.value.id)
-  showToast('支付成功，等待商家发货')
+const order = ref(null)
+const pendingReviews = computed(() => (order.value ? getOrderPendingItems(order.value) : []))
+const activeAfterSale = computed(() => (order.value ? getActiveAfterSale(order.value.id) : null))
+const afterSalePath = computed(() => {
+  if (!order.value) return '/after-sales'
+  if (activeAfterSale.value) return `/after-sales/${activeAfterSale.value.id}`
+  return `/after-sales/apply/${order.value.id}`
+})
+const load = async () => {
+  const data = await getOrderDetail(route.params.id)
+  order.value = data.order
 }
-
-const onCancel = async () => {
-  await showConfirmDialog({ title: '取消订单', message: '确定取消该订单吗？' })
-  cancelOrder(order.value.id)
-  showToast('订单已取消')
-}
-
-const onShip = () => {
-  shipOrder(order.value.id)
-  showToast('商家已发货')
-}
-
-const onConfirm = async () => {
-  await showConfirmDialog({ title: '确认收货', message: '确认已收到商品吗？' })
-  confirmOrder(order.value.id)
-  showToast('交易完成')
-}
-
-const buyAgain = () => {
-  const first = order.value?.goodsList?.[0]
-  if (first) router.push(`/goods/${first.goodsId}`)
-}
-
+const onPay = async () => { await payOrder(order.value.id, '微信支付'); showToast('支付成功'); await load() }
+const onCancel = async () => { await showConfirmDialog({ title: '取消订单' }); await cancelOrder(order.value.id); showToast('已取消'); await load() }
+const onConfirm = async () => { await confirmOrder(order.value.id); showToast('已确认收货'); await load() }
 const goReview = () => {
   const item = pendingReviews.value[0]
-  if (!item) {
-    router.push({ path: '/reviews', query: { tab: 'done' } })
-    return
-  }
-  router.push({
-    path: `/reviews/write/${item.orderId}/${item.goodsId}`,
-    query: { spec: item.spec },
-  })
+  if (item) router.push(`/reviews/write/${order.value.id}/${item.goodsId}`)
 }
-
-const afterSalePath = computed(() => {
-  const current = order.value
-  if (!current) return ''
-  const ticket = getActiveAfterSale(current.id) || getAfterSaleByOrderId(current.id)
-  if (current.status === '售后中' && ticket) return `/after-sales/${ticket.id}`
-  if (canApplyAfterSale(current)) return `/after-sales/apply/${current.id}`
-  if (ticket) return `/after-sales/${ticket.id}`
-  return ''
+const buyAgain = () => {
+  const item = order.value?.goodsList?.[0]
+  if (!item) return
+  prepareBuyNow({
+    goodsId: item.goodsId, name: item.name, image: item.image, price: item.price,
+    spec: item.spec, quantity: 1, shopName: item.shopName,
+  })
+  router.push('/checkout')
+}
+onMounted(async () => {
+  await Promise.all([loadAfterSales({ page: 1, size: 50 }), loadMyReviews({ page: 1, size: 50 })])
+  await load()
 })
 </script>
 
@@ -86,14 +66,14 @@ const afterSalePath = computed(() => {
         </div>
         <span>¥{{ item.price }}</span>
       </div>
-      <van-cell title="支付方式" :value="order.payType" />
+      <van-cell title="支付方式" :value="order.payType || '-'" />
       <van-cell title="下单时间" :value="order.createdAt" />
-      <van-cell v-if="order.expressNo" title="物流单号" :value="`${order.expressName} ${order.expressNo}`" />
+      <van-cell v-if="order.expressNo" title="物流信息" :value="`${order.expressName || ''} ${order.expressNo}`" />
       <van-cell title="实付款" :value="`¥${order.amount}`" />
     </section>
 
-    <section class="card">
-      <h3>订单跟踪</h3>
+    <section v-if="order.logs?.length" class="card">
+      <h3>订单动态</h3>
       <van-steps direction="vertical" :active="0">
         <van-step v-for="(log, index) in [...order.logs].reverse()" :key="index">{{ log }}</van-step>
       </van-steps>
@@ -102,14 +82,11 @@ const afterSalePath = computed(() => {
     <div class="bar fixed-bottom-bar">
       <van-button v-if="order.status === '待付款'" @click="onCancel">取消订单</van-button>
       <van-button v-if="order.status === '待付款'" type="primary" @click="onPay">立即支付</van-button>
-      <van-button v-if="order.status === '待发货'" @click="onCancel">取消订单</van-button>
-      <van-button v-if="order.status === '待发货'" type="primary" @click="onShip">模拟发货</van-button>
       <van-button v-if="order.status === '待收货'" type="primary" @click="onConfirm">确认收货</van-button>
       <van-button v-if="canApplyAfterSale(order)" @click="router.push(afterSalePath)">申请售后</van-button>
       <van-button v-if="order.status === '售后中'" type="primary" @click="router.push(afterSalePath)">查看售后</van-button>
-      <van-button v-else-if="afterSalePath && !canApplyAfterSale(order)" @click="router.push(afterSalePath)">售后记录</van-button>
       <van-button v-if="order.status === '已完成' && pendingReviews.length" type="primary" @click="goReview">评价晒单</van-button>
-      <van-button v-if="order.status === '已完成'" type="primary" @click="buyAgain">再买一单</van-button>
+      <van-button v-if="order.status === '已完成' || order.status === '已取消'" type="primary" plain @click="buyAgain">再来一单</van-button>
     </div>
   </div>
   <van-empty v-else description="订单不存在">
@@ -118,93 +95,19 @@ const afterSalePath = computed(() => {
 </template>
 
 <style scoped>
-.page {
-  min-height: 100vh;
-  padding-bottom: 72px;
-}
-
-.status {
-  padding: 20px 16px;
-  background: var(--brand-gradient);
-  color: #fff;
-}
-
-.status h2,
-.status p {
-  margin: 0;
-}
-
-.status p {
-  margin-top: 6px;
-  opacity: 0.86;
-}
-
-.card {
-  margin: 12px;
-  padding: 14px;
-  background: #fff;
-  border-radius: 16px;
-}
-
-h3 {
-  margin: 0 0 8px;
-}
-
-.card p {
-  margin: 0;
-  color: #4a5160;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.goods {
-  display: grid;
-  grid-template-columns: 64px 1fr auto;
-  gap: 10px;
-  padding: 8px 0 12px;
-}
-
-.goods img {
-  width: 64px;
-  height: 64px;
-  object-fit: cover;
-  border-radius: 10px;
-}
-
+.page { min-height: 100vh; padding-bottom: 72px; }
+.status { padding: 20px 16px; background: var(--brand-gradient); color: #fff; }
+.status h2, .status p { margin: 0; }
+.status p { margin-top: 6px; opacity: .86; }
+.card { margin: 12px; padding: 14px; background: #fff; border-radius: 16px; }
+h3 { margin: 0 0 8px; }
+.card > p { margin: 0; color: #4a5160; font-size: 13px; line-height: 1.6; }
+.goods { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; padding: 8px 0 12px; }
+.goods img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; background: #eef2ff; }
+.goods p { margin: 6px 0 0; color: #98a0b3; font-size: 12px; }
 .bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  background: #fff;
-}
-
-@media (min-width: 960px) {
-  .page {
-    width: min(860px, calc(100% - 48px));
-    margin: 0 auto;
-    padding: 0 0 96px;
-  }
-
-  .status {
-    border-radius: 16px;
-    margin-top: 8px;
-    padding: 28px 24px;
-  }
-
-  .card {
-    margin: 16px 0 0;
-    padding: 20px;
-  }
-
-  .bar {
-    height: 72px;
-    align-items: center;
-  }
+  position: fixed; left: 0; right: 0; bottom: 0; width: 100%;
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #fff;
 }
 </style>

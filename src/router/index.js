@@ -29,6 +29,7 @@ const routes = [
   { path: '/address', name: 'AddressList', component: () => import('@/views/AddressList.vue'), meta: { title: '收货地址', auth: true } },
   { path: '/address/edit/:id?', name: 'AddressForm', component: () => import('@/views/AddressForm.vue'), meta: { title: '编辑地址', auth: true } },
   { path: '/profile', name: 'Profile', component: () => import('@/views/Profile.vue'), meta: { title: '个人资料', auth: true } },
+  { path: '/browse-history', name: 'BrowseHistory', component: () => import('@/views/BrowseHistory.vue'), meta: { title: '浏览记录', auth: true } },
 ]
 
 const router = createRouter({
@@ -41,8 +42,8 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   if (to.meta.auth) {
-    const raw = localStorage.getItem('shop-app-user')
-    if (!raw) {
+    const token = localStorage.getItem('shop-app-token')
+    if (!token) {
       return { path: '/login', query: { redirect: to.fullPath } }
     }
   }

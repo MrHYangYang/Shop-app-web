@@ -1,13 +1,38 @@
 <script setup>
+import { computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
 import PcSidebar from '@/components/PcSidebar.vue'
+import { loadCart } from '@/composables/useCart'
+import { useUser } from '@/composables/useUser'
+import { getToken } from '@/utils/request'
+
+const route = useRoute()
+const { isLogin } = useUser()
+const isAuthPage = computed(() => ['/login', '/register'].includes(route.path))
+
+async function syncCartBadge() {
+  try {
+    await loadCart()
+  } catch (e) {
+    /* badge sync should not block page */
+  }
+}
+
+onMounted(() => {
+  if (getToken()) syncCartBadge()
+})
+
+watch(isLogin, () => {
+  syncCartBadge()
+})
 </script>
 
 <template>
-  <div class="app-shell">
-    <PcSidebar />
+  <div class="app-shell" :class="{ 'auth-mode': isAuthPage }">
+    <PcSidebar v-if="!isAuthPage" />
     <div class="app-content">
-      <AppHeader />
+      <AppHeader v-if="!isAuthPage" />
       <main class="app-main">
         <router-view />
       </main>
@@ -39,6 +64,10 @@ import PcSidebar from '@/components/PcSidebar.vue'
   .app-content {
     min-height: 100vh;
     min-width: 0;
+  }
+
+  .auth-mode {
+    grid-template-columns: 1fr;
   }
 }
 </style>

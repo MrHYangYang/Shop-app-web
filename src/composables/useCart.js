@@ -1,167 +1,128 @@
 import { computed, ref } from 'vue'
+import * as api from '@/api'
+import { getToken } from '@/utils/request'
 
-const STORAGE_KEY = 'shop-app-cart'
+const items = ref([])
+const buyNow = ref(null)
 
-const readCart = () => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
+const mapItem = (raw) => {
+  const cart = raw?.cart || raw || {}
+  const goods = raw?.goods || {}
+  const qty = Number(cart.qty ?? cart.quantity ?? raw.quantity ?? 1) || 1
+  const goodsId = cart.goodsId ?? goods.id ?? raw.goodsId
+  const skuName = cart.skuName || raw.skuName || raw.spec || '标准版'
+  return {
+    id: cart.id ?? raw.id,
+    goodsId,
+    skuId: cart.skuId ?? raw.skuId,
+    name: goods.name || raw.goodsName || raw.name || '',
+    image: goods.coverImage || raw.goodsImage || raw.image || '',
+    price: Number(goods.salePrice ?? raw.price ?? raw.salePrice ?? 0),
+    stock: Number(goods.stock ?? raw.stock ?? 99),
+    shopName: raw.shopName || goods.shopName || '',
+    spec: skuName,
+    skuName,
+    selected: (cart.selected ?? raw.selected ?? 1) !== 0,
+    quantity: qty,
+    qty,
   }
 }
 
-const items = ref(readCart())
-
-const persist = () => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items.value))
+export async function loadCart() {
+  if (!getToken()) { items.value = []; return items.value }
+  const list = (await api.getCart()) || []
+  items.value = list.map(mapItem)
+  return items.value
 }
 
-const count = computed(() => items.value.length)
-const selectedItems = computed(() => items.value.filter((item) => item.selected))
-const selectedCount = computed(() => selectedItems.value.reduce((sum, item) => sum + item.qty, 0))
-const selectedAmount = computed(() =>
-  selectedItems.value.reduce((sum, item) => sum + item.price * item.qty, 0),
-)
-const allSelected = computed(() => items.value.length > 0 && items.value.every((item) => item.selected))
+export async function addToCart(payload) {
+  await api.addCart({
+    goodsId: payload.goodsId,
+    skuName: payload.spec || payload.skuName || '标准版',
+    qty: payload.quantity || payload.qty || 1,
+  })
+  await loadCart()
+}
 
-export function addToCart(goods, { qty = 1, spec = '标准版' } = {}) {
-  const nextQty = Math.max(1, Number(qty) || 1)
-  const exist = items.value.find((item) => item.goodsId === goods.id && item.spec === spec)
-  if (exist) {
-    exist.qty += nextQty
-    exist.selected = true
-  } else {
-    items.value.unshift({
-      goodsId: goods.id,
-      name: goods.name,
-      image: goods.image,
-      price: goods.salePrice || goods.price,
-      shopName: goods.shopName,
-      spec,
-      qty: nextQty,
-      selected: true,
-    })
+export function prepareBuyNow(payload) {
+  buyNow.value = mapItem({
+    goodsId: payload.goodsId,
+    skuId: payload.skuId,
+    goodsName: payload.name,
+    name: payload.name,
+    goodsImage: payload.image,
+    image: payload.image,
+    price: payload.price,
+    salePrice: payload.price,
+    stock: payload.stock,
+    shopName: payload.shopName,
+    skuName: payload.spec || payload.skuName || '标准版',
+    quantity: payload.quantity || payload.qty || 1,
+    qty: payload.quantity || payload.qty || 1,
+    selected: 1,
+  })
+}
+
+export function clearBuyNow() { buyNow.value = null }
+
+export async function updateQty(goodsId, spec, quantity) {
+  const item = items.value.find((i) => String(i.goodsId) === String(goodsId) && i.spec === spec)
+  if (!item?.id) return
+  await api.updateCart(item.id, { qty: quantity })
+  await loadCart()
+}
+
+export async function removeItem(goodsId, spec) {
+  const item = items.value.find((i) => String(i.goodsId) === String(goodsId) && i.spec === spec)
+  if (!item?.id) return
+  await api.deleteCart(item.id)
+  await loadCart()
+}
+
+export async function toggleItem(goodsId, spec) {
+  const item = items.value.find((i) => String(i.goodsId) === String(goodsId) && i.spec === spec)
+  if (!item) return
+  const next = !item.selected
+  item.selected = next
+  if (item.id) {
+    try { await api.updateCart(item.id, { selected: next ? 1 : 0 }) } catch (e) { /* ignore */ }
   }
-  persist()
 }
 
-const BUY_NOW_KEY = 'shop-app-buynow'
+export async function toggleAll(val) {
+  items.value.forEach((i) => { i.selected = val })
+  await Promise.all(items.value.filter((i) => i.id).map((i) => api.updateCart(i.id, { selected: val ? 1 : 0 }).catch(() => {})))
+}
 
-const readBuyNow = () => {
-  try {
-    const raw = sessionStorage.getItem(BUY_NOW_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
+export async function completeCheckout() {
+  const targets = buyNow.value ? [] : items.value.filter((i) => i.selected && i.id)
+  clearBuyNow()
+  for (const item of targets) {
+    try { await api.deleteCart(item.id) } catch (e) { /* ignore */ }
   }
+  if (targets.length) await loadCart()
 }
 
-const buyNowItems = ref(readBuyNow())
-
-const persistBuyNow = () => {
-  if (buyNowItems.value.length) {
-    sessionStorage.setItem(BUY_NOW_KEY, JSON.stringify(buyNowItems.value))
-  } else {
-    sessionStorage.removeItem(BUY_NOW_KEY)
-  }
-}
-
-const toLine = (goods, qty, spec) => ({
-  goodsId: goods.id,
-  name: goods.name,
-  image: goods.image,
-  price: goods.salePrice || goods.price,
-  shopName: goods.shopName,
-  spec,
-  qty,
-  selected: true,
-})
-
-export function prepareBuyNow(goods, { qty = 1, spec = '标准版' } = {}) {
-  buyNowItems.value = [toLine(goods, Math.max(1, Number(qty) || 1), spec)]
-  persistBuyNow()
-}
-
-export function clearBuyNow() {
-  buyNowItems.value = []
-  persistBuyNow()
-}
-
-const checkoutItems = computed(() => (buyNowItems.value.length ? buyNowItems.value : selectedItems.value))
-const checkoutAmount = computed(() =>
-  checkoutItems.value.reduce((sum, item) => sum + item.price * item.qty, 0),
-)
-
-export function updateCheckoutQty(goodsId, spec, qty) {
-  const nextQty = Math.max(1, Number(qty) || 1)
-  if (buyNowItems.value.length) {
-    const item = buyNowItems.value.find((row) => row.goodsId === goodsId && row.spec === spec)
-    if (!item) return
-    item.qty = nextQty
-    persistBuyNow()
+export function updateCheckoutQty(goodsId, spec, quantity) {
+  if (buyNow.value && String(buyNow.value.goodsId) === String(goodsId)) {
+    buyNow.value.quantity = quantity
+    buyNow.value.qty = quantity
     return
   }
-  updateQty(goodsId, spec, nextQty)
-}
-
-export function completeCheckout() {
-  if (!buyNowItems.value.length) {
-    clearSelected()
-  }
-  clearBuyNow()
-}
-
-export function updateQty(goodsId, spec, qty) {
-  const item = items.value.find((row) => row.goodsId === goodsId && row.spec === spec)
-  if (!item) return
-  item.qty = Math.max(1, qty)
-  persist()
-}
-
-export function removeItem(goodsId, spec) {
-  items.value = items.value.filter((item) => !(item.goodsId === goodsId && item.spec === spec))
-  persist()
-}
-
-export function toggleItem(goodsId, spec) {
-  const item = items.value.find((row) => row.goodsId === goodsId && row.spec === spec)
-  if (!item) return
-  item.selected = !item.selected
-  persist()
-}
-
-export function toggleAll(checked) {
-  items.value.forEach((item) => {
-    item.selected = checked
-  })
-  persist()
-}
-
-export function clearSelected() {
-  items.value = items.value.filter((item) => !item.selected)
-  persist()
+  updateQty(goodsId, spec, quantity)
 }
 
 export function useCart() {
+  const count = computed(() => items.value.filter((i) => i.selected).length)
+  const allSelected = computed(() => items.value.length > 0 && items.value.every((i) => i.selected))
+  const selectedItems = computed(() => items.value.filter((i) => i.selected))
+  const selectedCount = computed(() => selectedItems.value.reduce((s, i) => s + i.quantity, 0))
+  const selectedAmount = computed(() => selectedItems.value.reduce((s, i) => s + Number(i.price) * i.quantity, 0))
+  const checkoutItems = computed(() => (buyNow.value ? [buyNow.value] : selectedItems.value))
+  const checkoutAmount = computed(() => checkoutItems.value.reduce((s, i) => s + Number(i.price) * i.quantity, 0))
   return {
-    items,
-    count,
-    selectedItems,
-    selectedCount,
-    selectedAmount,
-    allSelected,
-    addToCart,
-    prepareBuyNow,
-    clearBuyNow,
-    checkoutItems,
-    checkoutAmount,
-    updateCheckoutQty,
-    completeCheckout,
-    updateQty,
-    removeItem,
-    toggleItem,
-    toggleAll,
-    clearSelected,
+    items, count, allSelected, selectedCount, selectedAmount, checkoutItems, checkoutAmount,
+    loadCart, addToCart, prepareBuyNow, clearBuyNow, updateQty, removeItem, toggleItem, toggleAll,
+    completeCheckout, updateCheckoutQty,
   }
 }
